@@ -136,7 +136,7 @@ class SimpleSamletModelClass(EconModelClass):
                             sol.V[idx] = obj
                         #after studying
                         elif t > par.t_ls:
-                            obj = lambda x: - self.value_of_choice_w(x[0],motivation,credit,assets,t)
+                            obj = lambda x: - self.value_of_choice_w(x[0],motivation,assets,credit,t)
 
                             #bounds on consumption
                             lb_c = 0.000001 # avoid dividing with zero
@@ -177,7 +177,7 @@ class SimpleSamletModelClass(EconModelClass):
     #education status
     def educ(self,credit):
         par = self.par
-        if credit < par.complete:
+        if credit < (par.complete + 0.001):
             education=0.0
         else:
             education=1.0
@@ -202,14 +202,15 @@ class SimpleSamletModelClass(EconModelClass):
         par = self.par
         sol = self.sol
 
-        penalty = 0.0
-        if cons < 0.0:
-            penalty += cons*1_000.0
-            cons = 1.0e-5
+        # penalty = 0.0
+        # if cons < 0.0:
+        #     penalty += cons*1_000.0
+        #     cons = 1.0e-5
 
         util = self.util_w(cons)
 
         income = self.wage_func(credit)
+
         #Dynamics of G and m
         G_next = credit #unchanged while working
         m_next = motivation #always unchanged
@@ -323,44 +324,37 @@ class SimpleSamletModelClass(EconModelClass):
             sim.a[i,0] = sim.a_init[i]
             sim.G[i,0] = sim.G_init[i]
 
-            for i in range(par.simN):
+            for t in range(par.simT):
 
-                # initialize states
-                sim.m[i,0] = sim.m_init[i]
-                sim.a[i,0] = sim.a_init[i]
-                sim.G[i,0] = sim.G_init[i]
+                # interpolate optimal consumption and hours
+                idx_sol = (t,sim.m[i,t])
+                sim.c[i,t] = interp_2d(par.a_grid,par.G_grid,sol.c[idx_sol],sim.a[i,t],sim.G[i,t])
+                sim.g[i,t] = interp_2d(par.a_grid,par.G_grid,sol.g[idx_sol],sim.a[i,t],sim.G[i,t])
 
-                for t in range(par.simT):
+                # store next-period states
+                if t<(par.simT-1):
+                    #worker income
+                    income = self.wage_func(sim.G[i,t])
 
-                    # interpolate optimal consumption and hours
-                    idx_sol = (t,sim.m[i,t])
-                    sim.c[i,t] = interp_2d(par.a_grid,par.G_grid,sol.c[idx_sol],sim.a[i,t],sim.G[i,t])
-                    sim.g[i,t] = interp_2d(par.a_grid,par.G_grid,sol.g[idx_sol],sim.a[i,t],sim.G[i,t])
+                    #student income
+                    income_s = self.s_wage(sim.G[i,t],t)
 
-                    # store next-period states
-                    if t<(par.simT-1):
-                        #worker income
-                        income = self.wage_func(sim.G[i,t])
+                    #Dynamics of A
+                    if  ((sim.G[i,t]<(par.complete-0.001)) and (sim.g[i,t]>0.001)) and ((t>=par.tau) and (t<par.t_ls)): 
+                        sim.a[i,t+1] = (1+par.r)*(sim.a[i,t]-par.l + income_s - sim.c[i,t]) #student loan in some periods
 
-                        #student income
-                        income_s = self.s_wage(sim.G[i,t],t)
+                    elif ((sim.G[i,t]<par.complete) and (t<=par.tau)) and (sim.g[i,t]>0.001):
+                        sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income_s - sim.c[i,t]) #student income in some periods
 
-                        #Dynamics of A
-                        if  ((sim.G[i,t]<(par.complete-0.001)) and (sim.g[i,t]>0.001)) and ((t>=par.tau) and (t<par.t_ls)): 
-                            sim.a[i,t+1] = (1+par.r)*(sim.a[i,t]-par.l + income_s - sim.c[i,t]) #student loan in some periods
+                    else:
+                        sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income - sim.c[i,t]) #worker income in some periods
 
-                        elif ((sim.G[i,t]<par.complete) and (t<=par.tau)) and (sim.g[i,t]>0.001):
-                            sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income_s - sim.c[i,t]) #student income in some periods
+                    #Dynamics of m
+                    sim.m[i,t+1] = sim.m[i,t]
 
-                        else:
-                            sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income - sim.c[i,t]) #worker income in some periods
-
-                        #Dynamics of m
-                        sim.m[i,t+1] = sim.m[i,t]
-
-                        #Dynamics of G
-                        if (sim.G[i,t]<par.complete) and (t<=par.t_ls):
-                            sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]
-                        else:
-                            sim.G[i,t+1] = sim.G[i,t]
+                    #Dynamics of G
+                    if (sim.G[i,t]<par.complete) and (t<=par.t_ls):
+                        sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]
+                    else:
+                        sim.G[i,t+1] = sim.G[i,t]
 
