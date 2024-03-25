@@ -47,7 +47,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         par.Nupsilon = par.Nm #no. types
 
         par.gamma = 0.0005 #base parameter value
-        par.gamma_max = 0.017 #min disutility of studying 
+        par.gamma_max = 0.01 #min disutility of studying 
         par.gamma_min = 0.018 #max disutility of studying
         par.Ngamma = par.Nm
 
@@ -124,7 +124,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         sim.G_init = np.zeros(par.simN)
         sim.a_init = np.zeros(par.simN)
         sim.V_init = np.zeros(par.simN)
-        sim.m_init = np.random.choice(1,size=(par.simN)) #randomly choose types
+        sim.m_init = np.random.choice(10,size=(par.simN)) #randomly choose types
         sim.e_init = np.random.choice([0.0,1.0],size=(par.simN),p=(0.4,0.6))
     
     def solve(self):
@@ -136,7 +136,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         #solve worker problem
         for t in reversed(range(par.T)):
-            print(t)
+            # print(t)
             for i_e, education in enumerate(par.E_grid):
                 for i_a,assets in enumerate(par.a_grid):
                     idx_w = (t,i_e,i_a)
@@ -172,7 +172,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         #solve
         for t in reversed(range(par.T)):
-            print(t)
+            # print(t)
             for i_m,motivation in enumerate(par.m_grid):
                 for i_a,assets in enumerate(par.a_grid):
                     for i_G,credit in enumerate(par.G_grid):
@@ -208,7 +208,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                             ub_g = (par.complete-credit+1.0e-5) if (credit<par.complete+1.0e-5) else 1.0e-5
                             #ub_g = np.minimum(300,par.complete-credit+1.0e-5) #avoid dividing with 0 
 
-                            guess_g = ub_g if (par.complete-credit)<50 else 50.0
+                            guess_g = ub_g if (par.complete-credit)<60 else 60.0
 
                             bounds = ((lb_c,ub_c),(lb_g,ub_g))
 
@@ -318,7 +318,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         par = self.par
         
         #parameter values determined by motivation type
-        par.upsilon = par.upsilon_grid[motivation]
+        par.upsilon = 0.3 #par.upsilon_grid[motivation]
         par.gamma = par.gamma_grid[motivation]
 
         #disutility while studying
@@ -430,7 +430,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
                     elif (sim.g[i,t]>0.001) and ((sim.G[i,t]<par.complete-0.001) and (t<=par.tau)):
                         sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income_s - sim.c[i,t]) #student income in some periods
-                        print(t)
+                        # print(t)
                     else:
                         sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income - sim.c[i,t]) #worker income in some periods
 
