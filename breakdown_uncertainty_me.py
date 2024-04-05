@@ -62,6 +62,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         par.tau = 4 # last period with SU
         par.t_ls = 6 #last possible period to study
+        par.t_ls_b = 3 #last possible period to study bachelor
 
         #grids
         par.Ne = 3 #Number of education types
@@ -195,13 +196,33 @@ class SimpleBreakdownModelClass(EconModelClass):
                             #store results
                             sol.c_w[idx_w] = cons
                             sol.V_w[idx_w] = obj
+
+                    elif t>(par.t_ls+15):
+                        if assets<0.0:
+                            sol.c_w[idx_w] = -1.0
+                            sol.V_w[idx_w] = 1000000.0*assets
                         
+                        else:
+                            obj = lambda x: - self.value_of_choice_w(x[0],education,assets,t)
+
+                            #bounds on consumption
+                            lb_c = 0.000001 # avoid dividing with zero
+                            ub_c = (self.wage_func(education)) if (assets<0.0) else (self.wage_func(education) + assets)
+
+                            #call optimiser
+                            c_init = np.array(ub_c) if i_a==0 else (np.array([sol.c_w[t,i_e,i_a-1]]) if np.array([sol.c_w[t,i_e,i_a-1]])>0 else np.array([0.000001]))
+                            res = minimize(obj,c_init,bounds=((lb_c,np.inf),), method='Nelder-Mead')
+
+                            sol.c_w[idx_w] = res.x[0]
+                            sol.V_w[idx_w] = -res.fun
+
+
                     else:
                         obj = lambda x: - self.value_of_choice_w(x[0],education,assets,t)
 
                         #bounds on consumption
                         lb_c = 0.000001 # avoid dividing with zero
-                        ub_c = (self.wage_func(education)+1.0) if (assets<0.0) else (self.wage_func(education) + assets+1.0)
+                        ub_c = (self.wage_func(education)) if (assets<0.0) else (self.wage_func(education) + assets)
 
                         #call optimiser
                         c_init = np.array(ub_c) if i_a==0 else np.array([sol.c_w[t,i_e,i_a-1]])
@@ -275,7 +296,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                         #     sol.c[idx] = sol.c_w[idx_w]
                         #     sol.g[idx] = 0.0
 
-                        if sol.V[idx] == sol.V_w[idx_w]:
+                        if sol.V[idx] == V_work:
                             sol.c[idx] = sol.c_w[idx_w]
                             sol.g[idx] = 0.0
                         else:
@@ -372,7 +393,9 @@ class SimpleBreakdownModelClass(EconModelClass):
         EV_next = 0.0
         for i_xi,xi in enumerate(par.xi_grid):
             #Dynamics of G
-            if credit<par.complete:
+            if credit<par.bachelor and t>par.t_ls_b: #expelled if bachelor not finished in 4 years
+                G_next = credit
+            elif credit<par.complete:
                 G_next = credit+g*par.xi_grid[i_xi]
             else:
                 G_next = credit
@@ -488,13 +511,15 @@ class SimpleBreakdownModelClass(EconModelClass):
                     else:
                         sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income*sim.psi[i,t] - sim.c[i,t]) #worker income in some periods
 
-                    #Dynamics of m7
+                    #Dynamics of m
                     sim.m[i,t+1] = sim.m[i,t]
 
                     #Dynamics of G
-                    if ((par.complete)>sim.G[i,t]>(par.complete-40)) or (t==par.t_ls):
+                    if ((par.complete)>sim.G[i,t]>(par.complete-50)) or (t==par.t_ls):
                         sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]
-                    elif (sim.G[i,t]<(par.complete-40)) and (t<par.t_ls):
+                    elif ((par.bachelor)>sim.G[i,t]>(par.bachelor-50)) or (t==par.t_ls_b):
+                        sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]
+                    elif (sim.G[i,t]<(par.complete-50)) and (t<par.t_ls):
                         sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]*sim.xi[i,t]
                     else:
                         sim.G[i,t+1] = sim.G[i,t]
