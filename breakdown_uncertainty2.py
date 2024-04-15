@@ -392,7 +392,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         par = self.par
         
         #parameter values determined by motivation type
-        par.upsilon = 0.3 #par.upsilon_grid[motivation]
+        par.upsilon = 0.35 #par.upsilon_grid[motivation]
         par.gamma = par.gamma_grid[motivation]
 
         #disutility while studying
