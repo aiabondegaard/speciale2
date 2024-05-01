@@ -87,7 +87,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         # simulation
         par.simT = par.T # number of periods
-        par.simN = 1000 # number of individuals
+        par.simN = 50000 # number of individuals
 
     def allocate(self):
         """ allocate model """
@@ -146,6 +146,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         sim.G = np.nan + np.zeros(shape)
         sim.a = np.nan + np.zeros(shape)
         sim.e = np.nan + np.zeros(shape)
+        sim.U = np.nan + np.zeros(shape)
         sim.V = np.nan + np.zeros(shape)
         sim.m = np.zeros(shape,dtype=np.int_)
         sim.income = np.nan + np.zeros(shape)
@@ -172,7 +173,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         sim.a_init = np.zeros(par.simN)
         sim.V_init = np.zeros(par.simN)
         sim.m_init = np.random.choice(5,size=(par.simN)) #randomly choose types
-        sim.e_init = np.random.choice([0.0,1.0,2.0],size=(par.simN),p=(0.2,0.2,0.6))
+        sim.e_init = np.zeros(par.simN)
     
     def solve(self):
         """ solve model """
@@ -283,7 +284,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                             ub_g = (par.complete-credit+1.0e-5) if (credit<par.complete+1.0e-5) else 1.0e-5
                             #ub_g = np.minimum(300,par.complete-credit+1.0e-5) #avoid dividing with 0 
 
-                            guess_g = ub_g if (par.complete-credit)<60 else 60.0
+                            guess_g = (par.complete-credit) if (par.complete-credit)<=60 else 60.0
 
                             bounds = ((lb_c,ub_c),(lb_g,ub_g))
 
@@ -297,18 +298,18 @@ class SimpleBreakdownModelClass(EconModelClass):
                             
                         #max utility
                         sol.V[idx] = np.max([sol.V_s[idx],V_work])
-                        
-                        # if sol.V[idx] == sol.V_s[idx]:
-                        #     sol.c[idx] = sol.c_s[idx]
-                        # else:
-                        #     sol.c[idx] = sol.c_w[idx_w]
-                        #     sol.g[idx] = 0.0
 
-                        if sol.V[idx] == V_work:
+                        if sol.V[idx] == sol.V_s[idx]:
+                            sol.c[idx] = sol.c_s[idx]
+                        else:
                             sol.c[idx] = sol.c_w[idx_w]
                             sol.g[idx] = 0.0
-                        else:
-                            sol.c[idx] = sol.c_s[idx]
+
+                        # if sol.V[idx] == V_work:
+                        #     sol.c[idx] = sol.c_w[idx_w]
+                        #     sol.g[idx] = 0.0
+                        # else:
+                        #     sol.c[idx] = sol.c_s[idx]
                             
 
 
@@ -404,6 +405,10 @@ class SimpleBreakdownModelClass(EconModelClass):
             #Dynamics of G
             if credit<par.bachelor and t>par.t_ls_b: #expelled if bachelor not finished in 4 years
                 G_next = credit
+            elif (par.complete>credit>(par.complete-60)) or (t==par.t_ls):
+                G_next = credit+g
+            elif (par.bachelor>credit>(par.bachelor-60)) or (t==par.t_ls_b):
+                G_next = credit+g
             elif credit<par.complete:
                 G_next = credit+g*par.xi_grid[i_xi]
             else:
@@ -484,8 +489,6 @@ class SimpleBreakdownModelClass(EconModelClass):
             sim.a[i,0] = sim.a_init[i]
             sim.G[i,0] = sim.G_init[i]
             sim.e[i,0] = np.int_(sim.G[i,0]>=par.complete)
-            
-            
 
             for t in range(par.simT):
 
@@ -500,6 +503,12 @@ class SimpleBreakdownModelClass(EconModelClass):
                     sim.e[i,t] = 1
                 else:
                     sim.e[i,t] = 0
+                
+                #utility
+                sim.U[i,t] = self.util_s(sim.c[i,t],sim.g[i,t],sim.m[i,t],sim.G[i,t])
+
+                #discounted utility
+                sim.V[i,t] = sim.U[i,t]*(par.beta**t)
 
                 # store next-period states
                 if t<(par.simT-1):
@@ -545,7 +554,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                         sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]*sim.xi[i,t]
                     else:
                         sim.G[i,t+1] = sim.G[i,t]
-                
+
                     if t>0:
                         if sim.g[i,t-1] <= 0.0:
                             sim.g[i,t] = 0.0

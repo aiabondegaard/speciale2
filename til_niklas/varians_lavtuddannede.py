@@ -13,7 +13,7 @@ from consav.linear_interp import interp_2d
 from consav.linear_interp import interp_1d
 from consav.quadrature import log_normal_gauss_hermite
 
-class SimpleBreakdownModelClass(EconModelClass):
+class VariansLavtuddClass(EconModelClass):
     def settings(self):
         """ fundamental settings """
 
@@ -32,8 +32,10 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         par.rho = 1.3 #disutility of studying
 
-        par.sigma_s = 0.1 #standard deviation
-        par.sigma_w = 0.1 #standard deviation
+        par.sigma_s = 0.3 #standard deviation
+        par.sigma_w_l = 0.15 #standard deviation of wage for low education
+        par.sigma_w_b = 0.1 #standard deviation of wage for bachelor education
+        par.sigma_w_m = 0.05 #standard deviation of wage for master education
         
         #par.scale = par.sigma*np.sqrt(6)/math.pi #GEV scale
         #par.location = -(par.scale*np.euler_gamma) #generate mean zero shocks
@@ -42,15 +44,19 @@ class SimpleBreakdownModelClass(EconModelClass):
         par.alpha = 0.15 #wage premium for bachelor education
         par.yl = 1.0 #base wage
         par.r = 0.02 #interest rate
-        par.su = 0.5 #SU #0.16
+        par.su = 0.16 #SU
+        par.s_w = 0.14 #wage while studying
         par.l = par.su #slutloan
         par.complete = 300.0 #number of ECTS for masters degree
         par.bachelor = 180.0 #number of ECTS for bachelors degree
 
-        #motivation type
-        par.Nm = 10 #10 different types
+        par.tax = 0.4 #tax rate
+        par.tax_s = 0.0 #tax rate
 
-        par.upsilon = 0.25 #base parameter value
+        #motivation type
+        par.Nm = 5 #5 different types
+
+        par.upsilon = 0.8 #base parameter value
         par.upsilon_max = 0.4 #max base utility of studying
         par.upsilon_min = 0.3 #min base utility of studying
         par.Nupsilon = par.Nm #no. types
@@ -83,7 +89,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         # simulation
         par.simT = par.T # number of periods
-        par.simN = 1000 # number of individuals
+        par.simN = 50000 # number of individuals
 
     def allocate(self):
         """ allocate model """
@@ -111,7 +117,9 @@ class SimpleBreakdownModelClass(EconModelClass):
                     par.xi_grid[i] = 1.0
 
         # income shocks
-        par.psi_grid,par.psi_weight = log_normal_gauss_hermite(par.sigma_w,par.Npsi,mu=1.0)
+        par.psi_grid_l,par.psi_weight_l = log_normal_gauss_hermite(par.sigma_w_l,par.Npsi,mu=1.0)
+        par.psi_grid_b,par.psi_weight_b = log_normal_gauss_hermite(par.sigma_w_b,par.Npsi,mu=1.0)
+        par.psi_grid_m,par.psi_weight_m = log_normal_gauss_hermite(par.sigma_w_m,par.Npsi,mu=1.0)
         
         # credit grid
         par.G_grid = nonlinspace(par.G_min,par.G_max,par.Ng,1)
@@ -142,8 +150,11 @@ class SimpleBreakdownModelClass(EconModelClass):
         sim.G = np.nan + np.zeros(shape)
         sim.a = np.nan + np.zeros(shape)
         sim.e = np.nan + np.zeros(shape)
+        sim.U = np.nan + np.zeros(shape)
         sim.V = np.nan + np.zeros(shape)
         sim.m = np.zeros(shape,dtype=np.int_)
+        sim.income = np.nan + np.zeros(shape)
+        sim.su = np.nan + np.zeros(shape)
         
         #shock simulation
         rng = np.random.default_rng(seed=par.seed) #set seed
@@ -159,13 +170,15 @@ class SimpleBreakdownModelClass(EconModelClass):
                     sim.xi[i,t] = 1.0
         
         #income shocks
-        sim.psi = np.exp(par.sigma_w*rng.normal(size=shape) - 0.5*par.sigma_w**2)
+        sim.psi_l = np.exp(par.sigma_w_l*rng.normal(size=shape) - 0.5*par.sigma_w_l**2)
+        sim.psi_b = np.exp(par.sigma_w_b*rng.normal(size=shape) - 0.5*par.sigma_w_b**2)
+        sim.psi_m = np.exp(par.sigma_w_m*rng.normal(size=shape) - 0.5*par.sigma_w_m**2)
 
         #initialisation
         sim.G_init = np.zeros(par.simN)
         sim.a_init = np.zeros(par.simN)
         sim.V_init = np.zeros(par.simN)
-        sim.m_init = np.random.choice(10,size=(par.simN)) #randomly choose types
+        sim.m_init = np.random.choice(5,size=(par.simN)) #randomly choose types
         sim.e_init = np.random.choice([0.0,1.0,2.0],size=(par.simN),p=(0.2,0.2,0.6))
     
     def solve(self):
@@ -196,10 +209,11 @@ class SimpleBreakdownModelClass(EconModelClass):
                             #store results
                             sol.c_w[idx_w] = cons
                             sol.V_w[idx_w] = obj
+                            sol.g[idx_w] = 0.0
 
                     elif t>(par.t_ls+15):
                         if assets<0.0:
-                            sol.c_w[idx_w] = -1.0
+                            sol.c_w[idx_w] = 0.000001
                             sol.V_w[idx_w] = 1000000.0*assets
                         
                         else:
@@ -207,7 +221,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
                             #bounds on consumption
                             lb_c = 0.000001 # avoid dividing with zero
-                            ub_c = (self.wage_func(education)) if (assets<0.0) else (self.wage_func(education) + assets)
+                            ub_c = (self.wage_func(education)*(1-par.tax)) if (assets<0.0) else (self.wage_func(education)*(1-par.tax) + assets)
 
                             #call optimiser
                             c_init = np.array(ub_c) if i_a==0 else (np.array([sol.c_w[t,i_e,i_a-1]]) if np.array([sol.c_w[t,i_e,i_a-1]])>0 else np.array([0.000001]))
@@ -222,7 +236,7 @@ class SimpleBreakdownModelClass(EconModelClass):
 
                         #bounds on consumption
                         lb_c = 0.000001 # avoid dividing with zero
-                        ub_c = (self.wage_func(education)) if (assets<0.0) else (self.wage_func(education) + assets)
+                        ub_c = (self.wage_func(education)*(1-par.tax)) if (assets<0.0) else (self.wage_func(education)*(1-par.tax) + assets)
 
                         #call optimiser
                         c_init = np.array(ub_c) if i_a==0 else np.array([sol.c_w[t,i_e,i_a-1]])
@@ -255,6 +269,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                             else:
                                 obj = self.obj_last(cons)
                                 #store results
+                                sol.g[idx] = 0.0
                                 sol.c_s[idx] = cons
                                 sol.V_s[idx] = obj
 
@@ -275,7 +290,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                             ub_g = (par.complete-credit+1.0e-5) if (credit<par.complete+1.0e-5) else 1.0e-5
                             #ub_g = np.minimum(300,par.complete-credit+1.0e-5) #avoid dividing with 0 
 
-                            guess_g = ub_g if (par.complete-credit)<60 else 60.0
+                            guess_g = (par.complete-credit) if (par.complete-credit)<=60 else 60.0
 
                             bounds = ((lb_c,ub_c),(lb_g,ub_g))
 
@@ -289,7 +304,7 @@ class SimpleBreakdownModelClass(EconModelClass):
                             
                         #max utility
                         sol.V[idx] = np.max([sol.V_s[idx],V_work])
-                        
+
                         if sol.V[idx] == sol.V_s[idx]:
                             sol.c[idx] = sol.c_s[idx]
                         else:
@@ -328,7 +343,7 @@ class SimpleBreakdownModelClass(EconModelClass):
     def cons_last(self, education, assets):
         par = self.par
 
-        income = par.yl*(1+par.alpha*education)
+        income = self.wage_func(education)*(1-par.tax)
         cons = assets + income
         return cons + 1.0e-5
     
@@ -349,21 +364,47 @@ class SimpleBreakdownModelClass(EconModelClass):
 
         util = self.util_w(cons)
 
-        income = self.wage_func(education)
+        income = self.wage_func(education)*(1-par.tax)
 
         e_next = education
         
         # loop over ects shocks
         EV_next = 0.0
-        for i_psi,psi in enumerate(par.psi_grid):
-            #Dynamics of assets
-            a_next = (1.0+par.r)*(assets + income*par.psi_grid[i_psi] - cons)
+        if education==0:
+            for i_psi,psi in enumerate(par.psi_grid_l):
+                #Dynamics of assets
+                a_next = (1.0+par.r)*(assets + income*par.psi_grid_l[i_psi] - cons)
 
-            #Next period utility
-            V_next = sol.V_w[t+1,e_next]
-            V_next_interp = interp_1d(par.a_grid,V_next,a_next)
+                #Next period utility
+                V_next = sol.V_w[t+1,e_next]
+                V_next_interp = interp_1d(par.a_grid,V_next,a_next)
 
-            EV_next += V_next_interp*par.psi_weight[i_psi]
+                EV_next += V_next_interp*par.psi_weight_l[i_psi]
+
+        elif education==1:
+            for i_psi,psi in enumerate(par.psi_grid_b):
+                #Dynamics of assets
+                a_next = (1.0+par.r)*(assets + income*par.psi_grid_b[i_psi] - cons)
+
+                #Next period utility
+                V_next = sol.V_w[t+1,e_next]
+                V_next_interp = interp_1d(par.a_grid,V_next,a_next)
+
+                EV_next += V_next_interp*par.psi_weight_b[i_psi]
+        
+        elif education==2:
+            for i_psi,psi in enumerate(par.psi_grid_m):
+                #Dynamics of assets
+                a_next = (1.0+par.r)*(assets + income*par.psi_grid_m[i_psi] - cons)
+
+                #Next period utility
+                V_next = sol.V_w[t+1,e_next]
+                V_next_interp = interp_1d(par.a_grid,V_next,a_next)
+
+                EV_next += V_next_interp*par.psi_weight_m[i_psi]
+        
+        else:
+            print("Error: Education level not defined")
         
         return util + par.beta*EV_next #+penalty
     
@@ -379,7 +420,8 @@ class SimpleBreakdownModelClass(EconModelClass):
         if g>0.001:
             income = self.s_wage(credit,t)
         else:
-            income = par.yl*(1+par.alpha*(self.educ_level(credit)))
+            income = 0.000001
+            #income = par.yl*(1+par.alpha*(self.educ_level(credit)))
 
         m_next = motivation #always unchanged
         
@@ -395,6 +437,10 @@ class SimpleBreakdownModelClass(EconModelClass):
             #Dynamics of G
             if credit<par.bachelor and t>par.t_ls_b: #expelled if bachelor not finished in 4 years
                 G_next = credit
+            elif (par.complete>credit>(par.complete-60)) or (t==par.t_ls):
+                G_next = credit+g
+            elif (par.bachelor>credit>(par.bachelor-60)) or (t==par.t_ls_b):
+                G_next = credit+g
             elif credit<par.complete:
                 G_next = credit+g*par.xi_grid[i_xi]
             else:
@@ -415,7 +461,7 @@ class SimpleBreakdownModelClass(EconModelClass):
         par = self.par
         
         #parameter values determined by motivation type
-        par.upsilon = 0.3 #par.upsilon_grid[motivation]
+        #par.upsilon = 20.0 #par.upsilon_grid[motivation]
         par.gamma = par.gamma_grid[motivation]
 
         #disutility while studying
@@ -440,22 +486,23 @@ class SimpleBreakdownModelClass(EconModelClass):
     def wage_func(self,education):
         par = self.par
         
-        return par.yl*(1+education*par.alpha)
+        return par.yl*(1+education*par.alpha) #pre tax income
 
     #income of students
     def s_wage(self,credit,t):
         par = self.par
 
+
         #if taking loans
         if (t>par.tau) and (credit<par.complete):
-            return par.l
+            return par.l + par.s_w*(1-par.tax_s)
         
         #if working
         # if (abs(credit-par.complete))<=0.001:
         #     return par.yl*(1+par.alpha*(credit>=par.complete))
         
         #while studying and not taking loans
-        return par.su
+        return par.su + par.s_w*(1-par.tax_s)
 
     
     #Simulation
@@ -474,8 +521,6 @@ class SimpleBreakdownModelClass(EconModelClass):
             sim.a[i,0] = sim.a_init[i]
             sim.G[i,0] = sim.G_init[i]
             sim.e[i,0] = np.int_(sim.G[i,0]>=par.complete)
-            
-            
 
             for t in range(par.simT):
 
@@ -490,13 +535,19 @@ class SimpleBreakdownModelClass(EconModelClass):
                     sim.e[i,t] = 1
                 else:
                     sim.e[i,t] = 0
+                
+                #utility
+                sim.U[i,t] = self.util_s(sim.c[i,t],sim.g[i,t],sim.m[i,t],sim.G[i,t])
+
+                #discounted utility
+                sim.V[i,t] = sim.U[i,t]*(par.beta**t)
 
                 # store next-period states
                 if t<(par.simT-1):
 
 
                     #worker income
-                    income = self.wage_func(sim.e[i,t])
+                    income = self.wage_func(sim.e[i,t])*(1-par.tax)
 
                     #student income
                     income_s = self.s_wage(sim.G[i,t],t)
@@ -504,26 +555,49 @@ class SimpleBreakdownModelClass(EconModelClass):
                     #Dynamics of A
                     if  ((sim.G[i,t]<(par.complete)) and (sim.g[i,t]>0.001)) and ((t>par.tau) and (t<=par.t_ls)): 
                         sim.a[i,t+1] = (1+par.r)*(sim.a[i,t]-par.l + income_s - sim.c[i,t]) #student loan in some periods
+                        
+                        sim.income[i,t] = 0.0 #no income while studying
+
+                        sim.su[i,t] = 0.0 #no SU
 
                     elif (sim.g[i,t]>0.001) and ((sim.G[i,t]<par.complete) and (t<=par.tau)):
                         sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income_s - sim.c[i,t]) #student income in some periods
-                        # print(t)
+                        
+                        sim.income[i,t] = 0.0 #no income while studying
+
+                        sim.su[i,t] = par.su #SU
+
                     else:
-                        sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income*sim.psi[i,t] - sim.c[i,t]) #worker income in some periods
+                        if sim.e[i,t]==0:
+                            sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income*sim.psi_l[i,t] - sim.c[i,t]) #worker income in some periods
+
+                            sim.income[i,t] = self.wage_func(sim.e[i,t])*sim.psi_l[i,t] #worker income
+                        
+                        elif sim.e[i,t]==1:
+                            sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income*sim.psi_b[i,t] - sim.c[i,t])
+
+                            sim.income[i,t] = self.wage_func(sim.e[i,t])*sim.psi_b[i,t] #worker income
+                        
+                        elif sim.e[i,t]==2:
+                            sim.a[i,t+1] = (1+par.r)*(sim.a[i,t] + income*sim.psi_m[i,t] - sim.c[i,t])
+
+                            sim.income[i,t] = self.wage_func(sim.e[i,t])*sim.psi_m[i,t]
+                        
+                        sim.su[i,t] = 0.0 #no SU
 
                     #Dynamics of m
                     sim.m[i,t+1] = sim.m[i,t]
 
                     #Dynamics of G
-                    if ((par.complete)>sim.G[i,t]>(par.complete-50)) or (t==par.t_ls):
+                    if ((par.complete)>sim.G[i,t]>(par.complete-60)) or (t==par.t_ls):
                         sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]
-                    elif ((par.bachelor)>sim.G[i,t]>(par.bachelor-50)) or (t==par.t_ls_b):
+                    elif ((par.bachelor)>sim.G[i,t]>(par.bachelor-60)) or (t==par.t_ls_b):
                         sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]
-                    elif (sim.G[i,t]<(par.complete-50)) and (t<par.t_ls):
+                    elif (sim.G[i,t]<(par.complete-60)) and (t<par.t_ls):
                         sim.G[i,t+1] = sim.G[i,t]+sim.g[i,t]*sim.xi[i,t]
                     else:
                         sim.G[i,t+1] = sim.G[i,t]
-                
+
                     if t>0:
                         if sim.g[i,t-1] <= 0.0:
                             sim.g[i,t] = 0.0
